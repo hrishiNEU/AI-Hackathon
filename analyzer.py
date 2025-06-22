@@ -46,7 +46,7 @@ class SolarPanelGridSimulator:
                         })
         return pd.DataFrame(coords)
 
-    def generate_environmental_data(self, days=30):
+    def generate_environmental_data(self, days=7):
         """Generate environmental and operational data for the solar panel grid"""
         np.random.seed(42)  # For reproducible results
 
@@ -81,7 +81,7 @@ class SolarPanelGridSimulator:
                 base_cleanliness = 0.95 - (days - day) * 0.01  # Gradual degradation
 
                 # Dust accumulation factors with more realistic variation
-                base_dust_rate = 0.01 + 0.005 * np.sin(2 * np.pi * day / 30)  # Monthly cycle
+                base_dust_rate = 0.02 + 0.01 * np.sin(2 * np.pi * day / 7)  # Weekly cycle for shorter period
                 dust_accumulation = base_dust_rate * (day + 1)  # Cumulative dust
                 dust_accumulation += np.random.exponential(0.05)  # Random dust events
 
@@ -124,7 +124,7 @@ class SolarPanelGridSimulator:
                 cleaning_threshold_base = 0.15  # 15% base probability
                 efficiency_factor = max(0, (90 - efficiency) / 100)  # Higher probability for lower efficiency
                 dirt_factor = dirt_coverage_percent / 100
-                time_factor = min(0.3, day / 30)  # Time-based factor
+                time_factor = min(0.3, day / 7)  # Time-based factor adjusted for 7 days
 
                 cleaning_probability = cleaning_threshold_base + efficiency_factor + dirt_factor + time_factor
                 needs_cleaning = np.random.random() < cleaning_probability
@@ -175,8 +175,8 @@ class SolarPanelGridSimulator:
 
 class SolarMaintenancePredictor:
     def __init__(self):
-        self.efficiency_model = RandomForestRegressor(n_estimators=100, random_state=42)
-        self.cleaning_model = GradientBoostingClassifier(n_estimators=100, random_state=42)
+        self.efficiency_model = RandomForestRegressor(n_estimators=50, random_state=42)  # Reduced trees
+        self.cleaning_model = GradientBoostingClassifier(n_estimators=50, random_state=42)  # Reduced trees
         self.scaler = StandardScaler()
         self.is_trained = False
 
@@ -284,157 +284,169 @@ def visualize_results(data, grid_simulator):
 
     # Set up the plotting style
     plt.style.use('seaborn-v0_8')
-    fig = plt.figure(figsize=(20, 16))
+    fig = plt.figure(figsize=(20, 15))
 
     # Get latest data for spatial plots
     latest_data = data[data['date'] == data['date'].max()].copy()
 
-    # 1. Grid efficiency heatmap
+    # 1. Efficiency vs dirt coverage
     ax1 = plt.subplot(3, 4, 1)
-    pivot_eff = latest_data.pivot_table(
-        values='efficiency',
-        index='y_coord',
-        columns='x_coord',
-        aggfunc='mean'
-    )
-    sns.heatmap(pivot_eff, cmap='RdYlGn', center=85, ax=ax1, cbar_kws={'label': 'Efficiency (%)'})
-    ax1.set_title('Current Grid Efficiency Distribution')
-    ax1.set_xlabel('X Coordinate (km)')
-    ax1.set_ylabel('Y Coordinate (km)')
+    scatter = ax1.scatter(data['dirt_coverage_percent'], data['efficiency'],
+                          c=data['cleaning_probability'], cmap='Reds', alpha=0.6, s=20)
+    ax1.set_xlabel('Dirt Coverage (%)', fontsize=10)
+    ax1.set_ylabel('Efficiency (%)', fontsize=10)
+    ax1.set_title('Efficiency vs Dirt Coverage', fontsize=12, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    plt.colorbar(scatter, ax=ax1, label='Cleaning Probability')
 
-    # 2. Cleaning needs heatmap
+    # 2. Voltage distribution
     ax2 = plt.subplot(3, 4, 2)
-    pivot_clean = latest_data.pivot_table(
-        values='cleaning_probability',
-        index='y_coord',
-        columns='x_coord',
-        aggfunc='mean'
-    )
-    sns.heatmap(pivot_clean, cmap='Reds', ax=ax2, cbar_kws={'label': 'Cleaning Probability'})
-    ax2.set_title('Predicted Cleaning Needs')
-    ax2.set_xlabel('X Coordinate (km)')
-    ax2.set_ylabel('Y Coordinate (km)')
+    ax2.hist(data['voltage'], bins=40, alpha=0.7, color='blue', edgecolor='black')
+    ax2.axvline(data['voltage'].mean(), color='red', linestyle='--', linewidth=2,
+                label=f'Mean: {data["voltage"].mean():.1f}V')
+    ax2.set_xlabel('Voltage (V)', fontsize=10)
+    ax2.set_ylabel('Frequency', fontsize=10)
+    ax2.set_title('Voltage Distribution Across Grid', fontsize=12, fontweight='bold')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
 
-    # 3. Efficiency vs dirt coverage
+    # 3. Time series of average efficiency
     ax3 = plt.subplot(3, 4, 3)
-    scatter = ax3.scatter(data['dirt_coverage_percent'], data['efficiency'],
-                          c=data['cleaning_probability'], cmap='Reds', alpha=0.6)
-    ax3.set_xlabel('Dirt Coverage (%)')
-    ax3.set_ylabel('Efficiency (%)')
-    ax3.set_title('Efficiency vs Dirt Coverage')
-    plt.colorbar(scatter, ax=ax3, label='Cleaning Probability')
-
-    # 4. Voltage distribution
-    ax4 = plt.subplot(3, 4, 4)
-    ax4.hist(data['voltage'], bins=50, alpha=0.7, color='blue', edgecolor='black')
-    ax4.axvline(data['voltage'].mean(), color='red', linestyle='--',
-                label=f'Mean: {data["voltage"].mean():.2f}V')
-    ax4.set_xlabel('Voltage (V)')
-    ax4.set_ylabel('Frequency')
-    ax4.set_title('Voltage Distribution Across Grid')
-    ax4.legend()
-
-    # 5. Time series of average efficiency
-    ax5 = plt.subplot(3, 4, 5)
     daily_efficiency = data.groupby('date')['efficiency'].mean()
-    ax5.plot(daily_efficiency.index, daily_efficiency.values, marker='o', linewidth=2)
-    ax5.set_xlabel('Date')
-    ax5.set_ylabel('Average Efficiency (%)')
-    ax5.set_title('Daily Average Grid Efficiency')
-    ax5.tick_params(axis='x', rotation=45)
+    ax3.plot(daily_efficiency.index, daily_efficiency.values, marker='o', linewidth=2, markersize=6)
+    ax3.set_xlabel('Date', fontsize=10)
+    ax3.set_ylabel('Average Efficiency (%)', fontsize=10)
+    ax3.set_title('Daily Average Grid Efficiency', fontsize=12, fontweight='bold')
+    ax3.grid(True, alpha=0.3)
+    # Format dates better
+    ax3.tick_params(axis='x', rotation=45, labelsize=8)
+    dates = daily_efficiency.index
+    ax3.set_xticks(dates[::max(1, len(dates) // 4)])  # Show max 4 date labels
 
-    # 6. Cleaning urgency by sector
-    ax6 = plt.subplot(3, 4, 6)
+    # 4. Cleaning urgency by sector
+    ax4 = plt.subplot(3, 4, 4)
     sector_urgency = latest_data.groupby('sector')['urgency_score'].mean().sort_values(ascending=False)
-    top_sectors = sector_urgency.head(10)
-    bars = ax6.bar(range(len(top_sectors)), top_sectors.values, color='orange', alpha=0.7)
-    ax6.set_xlabel('Sector')
-    ax6.set_ylabel('Average Urgency Score')
-    ax6.set_title('Top 10 Sectors Needing Attention')
-    ax6.set_xticks(range(len(top_sectors)))
-    ax6.set_xticklabels(top_sectors.index, rotation=45)
+    top_sectors = sector_urgency.head(8)  # Reduced to 8 for better readability
+    bars = ax4.bar(range(len(top_sectors)), top_sectors.values, color='orange', alpha=0.7)
+    ax4.set_xlabel('Sector', fontsize=10)
+    ax4.set_ylabel('Average Urgency Score', fontsize=10)
+    ax4.set_title('Top 8 Sectors Needing Attention', fontsize=12, fontweight='bold')
+    ax4.set_xticks(range(len(top_sectors)))
+    ax4.set_xticklabels([s.replace('S_', '') for s in top_sectors.index], rotation=45, ha='right', fontsize=8)
+    ax4.grid(True, alpha=0.3, axis='y')
 
-    # 7. Power output vs temperature
-    ax7 = plt.subplot(3, 4, 7)
-    ax7.scatter(data['temperature'], data['power_output'], alpha=0.5, color='green')
-    ax7.set_xlabel('Temperature (°C)')
-    ax7.set_ylabel('Power Output (W)')
-    ax7.set_title('Power Output vs Temperature')
+    # 5. Power output vs temperature
+    ax5 = plt.subplot(3, 4, 5)
+    ax5.scatter(data['temperature'], data['power_output'], alpha=0.5, color='green', s=15)
+    ax5.set_xlabel('Temperature (°C)', fontsize=10)
+    ax5.set_ylabel('Power Output (W)', fontsize=10)
+    ax5.set_title('Power Output vs Temperature', fontsize=12, fontweight='bold')
+    ax5.grid(True, alpha=0.3)
 
-    # 8. Surface reflectivity distribution
-    ax8 = plt.subplot(3, 4, 8)
+    # 6. Surface reflectivity distribution
+    ax6 = plt.subplot(3, 4, 6)
     clean_panels = data[data['needs_cleaning'] == False]['surface_reflectivity']
     dirty_panels = data[data['needs_cleaning'] == True]['surface_reflectivity']
 
-    ax8.hist(clean_panels, bins=30, alpha=0.7, label='Clean Panels', color='green')
-    ax8.hist(dirty_panels, bins=30, alpha=0.7, label='Needs Cleaning', color='red')
-    ax8.set_xlabel('Surface Reflectivity')
-    ax8.set_ylabel('Frequency')
-    ax8.set_title('Surface Reflectivity Distribution')
-    ax8.legend()
+    ax6.hist(clean_panels, bins=25, alpha=0.7, label='Clean Panels', color='green', density=True)
+    ax6.hist(dirty_panels, bins=25, alpha=0.7, label='Needs Cleaning', color='red', density=True)
+    ax6.set_xlabel('Surface Reflectivity', fontsize=10)
+    ax6.set_ylabel('Density', fontsize=10)
+    ax6.set_title('Surface Reflectivity Distribution', fontsize=12, fontweight='bold')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
 
-    # 9. Correlation matrix of key variables
-    ax9 = plt.subplot(3, 4, 9)
-    corr_vars = ['efficiency', 'dirt_coverage_percent', 'surface_reflectivity',
-                 'voltage', 'temperature', 'urgency_score']
-    corr_matrix = data[corr_vars].corr()
-    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=ax9)
-    ax9.set_title('Feature Correlation Matrix')
-
-    # 10. Efficiency prediction accuracy
-    ax10 = plt.subplot(3, 4, 10)
+    # 7. Efficiency prediction accuracy
+    ax7 = plt.subplot(3, 4, 7)
     if 'predicted_efficiency' in data.columns:
-        ax10.scatter(data['efficiency'], data['predicted_efficiency'], alpha=0.5)
+        ax7.scatter(data['efficiency'], data['predicted_efficiency'], alpha=0.5, s=15)
         min_eff, max_eff = data['efficiency'].min(), data['efficiency'].max()
-        ax10.plot([min_eff, max_eff], [min_eff, max_eff], 'r--', label='Perfect Prediction')
-        ax10.set_xlabel('Actual Efficiency (%)')
-        ax10.set_ylabel('Predicted Efficiency (%)')
-        ax10.set_title('Efficiency Prediction Accuracy')
-        ax10.legend()
+        ax7.plot([min_eff, max_eff], [min_eff, max_eff], 'r--', linewidth=2, label='Perfect Prediction')
+        ax7.set_xlabel('Actual Efficiency (%)', fontsize=10)
+        ax7.set_ylabel('Predicted Efficiency (%)', fontsize=10)
+        ax7.set_title('Efficiency Prediction Accuracy', fontsize=12, fontweight='bold')
+        ax7.legend()
+        ax7.grid(True, alpha=0.3)
 
-    # 11. Daily cleaning recommendations
-    ax11 = plt.subplot(3, 4, 11)
+    # 8. Daily cleaning recommendations
+    ax8 = plt.subplot(3, 4, 8)
     daily_cleaning = data.groupby('date')['needs_cleaning'].sum()
-    ax11.plot(daily_cleaning.index, daily_cleaning.values, marker='s', color='red', linewidth=2)
-    ax11.set_xlabel('Date')
-    ax11.set_ylabel('Panels Needing Cleaning')
-    ax11.set_title('Daily Cleaning Recommendations')
-    ax11.tick_params(axis='x', rotation=45)
+    ax8.plot(daily_cleaning.index, daily_cleaning.values, marker='s', color='red', linewidth=2, markersize=6)
+    ax8.set_xlabel('Date', fontsize=10)
+    ax8.set_ylabel('Panels Needing Cleaning', fontsize=10)
+    ax8.set_title('Daily Cleaning Recommendations', fontsize=12, fontweight='bold')
+    ax8.grid(True, alpha=0.3)
+    ax8.tick_params(axis='x', rotation=45, labelsize=8)
+    # Show fewer date labels
+    dates = daily_cleaning.index
+    ax8.set_xticks(dates[::max(1, len(dates) // 4)])
+
+    # 9. Efficiency Distribution by Cleaning Status
+    ax9 = plt.subplot(3, 4, 9)
+    clean_efficiency = data[data['needs_cleaning'] == False]['efficiency']
+    dirty_efficiency = data[data['needs_cleaning'] == True]['efficiency']
+
+    ax9.hist(clean_efficiency, bins=25, alpha=0.7, label='Clean Panels', color='green', density=True)
+    ax9.hist(dirty_efficiency, bins=25, alpha=0.7, label='Needs Cleaning', color='red', density=True)
+    ax9.set_xlabel('Efficiency (%)', fontsize=10)
+    ax9.set_ylabel('Density', fontsize=10)
+    ax9.set_title('Efficiency Distribution by Status', fontsize=12, fontweight='bold')
+    ax9.legend()
+    ax9.grid(True, alpha=0.3)
+
+    # 10. Power Output Distribution
+    ax10 = plt.subplot(3, 4, 10)
+    ax10.hist(data['power_output'], bins=40, alpha=0.7, color='purple', edgecolor='black')
+    ax10.axvline(data['power_output'].mean(), color='red', linestyle='--', linewidth=2,
+                 label=f'Mean: {data["power_output"].mean():.0f}W')
+    ax10.set_xlabel('Power Output (W)', fontsize=10)
+    ax10.set_ylabel('Frequency', fontsize=10)
+    ax10.set_title('Power Output Distribution', fontsize=12, fontweight='bold')
+    ax10.legend()
+    ax10.grid(True, alpha=0.3)
+
+    # 11. Dirt Coverage vs Cleaning Probability
+    ax11 = plt.subplot(3, 4, 11)
+    scatter = ax11.scatter(data['dirt_coverage_percent'], data['cleaning_probability'],
+                           c=data['urgency_score'], cmap='YlOrRd', alpha=0.6, s=20)
+    ax11.set_xlabel('Dirt Coverage (%)', fontsize=10)
+    ax11.set_ylabel('Cleaning Probability', fontsize=10)
+    ax11.set_title('Dirt Coverage vs Cleaning Need', fontsize=12, fontweight='bold')
+    ax11.grid(True, alpha=0.3)
+    plt.colorbar(scatter, ax=ax11, label='Urgency Score')
 
     # 12. Summary statistics
     ax12 = plt.subplot(3, 4, 12)
     ax12.axis('off')
 
-    stats_text = f"""
-    GRID SUMMARY STATISTICS
+    stats_text = f"""GRID SUMMARY STATISTICS
 
-    Total Panels: {len(latest_data):,}
-    Grid Area: {grid_simulator.grid_size_km}×{grid_simulator.grid_size_km} km²
+Total Panels: {len(latest_data):,}
+Grid Area: {grid_simulator.grid_size_km}×{grid_simulator.grid_size_km} km²
 
-    Current Performance:
-    • Avg Efficiency: {latest_data['efficiency'].mean():.1f}%
-    • Min Efficiency: {latest_data['efficiency'].min():.1f}%
-    • Max Efficiency: {latest_data['efficiency'].max():.1f}%
+Current Performance:
+• Avg Efficiency: {latest_data['efficiency'].mean():.1f}%
+• Min Efficiency: {latest_data['efficiency'].min():.1f}%
+• Max Efficiency: {latest_data['efficiency'].max():.1f}%
 
-    Maintenance Needs:
-    • Panels Needing Cleaning: {latest_data['needs_cleaning'].sum():,}
-    • Percentage Needing Cleaning: {(latest_data['needs_cleaning'].mean() * 100):.1f}%
-    • Avg Urgency Score: {latest_data['urgency_score'].mean():.1f}
+Maintenance Needs:
+• Panels Needing Cleaning: {latest_data['needs_cleaning'].sum():,}
+• Percentage Needing Cleaning: {(latest_data['needs_cleaning'].mean() * 100):.1f}%
+• Avg Urgency Score: {latest_data['urgency_score'].mean():.1f}
 
-    Power Generation:
-    • Total Power Output: {latest_data['power_output'].sum() / 1000:.1f} MW
-    • Avg Power per Panel: {latest_data['power_output'].mean():.1f} W
+Power Generation:
+• Total Power Output: {latest_data['power_output'].sum() / 1000:.1f} MW
+• Avg Power per Panel: {latest_data['power_output'].mean():.0f} W
 
-    Environmental:
-    • Avg Temperature: {latest_data['temperature'].mean():.1f}°C
-    • Avg Dirt Coverage: {latest_data['dirt_coverage_percent'].mean():.1f}%
-    """
+Environmental:
+• Avg Temperature: {latest_data['temperature'].mean():.1f}°C
+• Avg Dirt Coverage: {latest_data['dirt_coverage_percent'].mean():.1f}%"""
 
-    ax12.text(0.1, 0.9, stats_text, transform=ax12.transAxes, fontsize=10,
+    ax12.text(0.05, 0.95, stats_text, transform=ax12.transAxes, fontsize=11,
               verticalalignment='top', fontfamily='monospace',
-              bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+              bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.8))
 
-    plt.tight_layout()
+    plt.tight_layout(pad=2.0)
     plt.show()
 
 
@@ -447,7 +459,8 @@ def generate_maintenance_report(data, feature_importance, feature_names):
     print("SOLAR PANEL GRID MAINTENANCE REPORT")
     print("=" * 80)
     print(f"Report Date: {latest_data['date'].iloc[0].strftime('%Y-%m-%d')}")
-    print(f"Grid Coverage: {int(np.sqrt(len(latest_data)))}×{int(np.sqrt(len(latest_data)))} km²")
+    print(
+        f"Grid Coverage: {int(np.sqrt(len(latest_data) / 10))}×{int(np.sqrt(len(latest_data) / 10))} km² (~{int(np.sqrt(len(latest_data) / 10)) ** 2} sq km)")
     print(f"Total Panels Monitored: {len(latest_data):,}")
 
     print("\n" + "=" * 50)
@@ -580,14 +593,14 @@ def main():
     print("=" * 60)
 
     # Initialize the grid simulator
-    grid_simulator = SolarPanelGridSimulator(grid_size_km=10, panels_per_km2=100)  # 10k panels for demo
+    grid_simulator = SolarPanelGridSimulator(grid_size_km=3, panels_per_km2=300)  # 3x3 km = 9 sq km, ~2700 panels
     print(
-        f"✅ Grid initialized: {grid_simulator.total_panels:,} panels across {grid_simulator.grid_size_km}×{grid_simulator.grid_size_km} km²")
+        f"✅ Grid initialized: {grid_simulator.total_panels:,} panels across {grid_simulator.grid_size_km}×{grid_simulator.grid_size_km} km² (~{grid_simulator.grid_size_km ** 2} sq km)")
 
     # Generate environmental and operational data
     print("🌍 Generating environmental and operational data...")
-    data = grid_simulator.generate_environmental_data(days=30)
-    print(f"✅ Generated {len(data):,} data points over 30 days")
+    data = grid_simulator.generate_environmental_data(days=7)
+    print(f"✅ Generated {len(data):,} data points over 7 days")
 
     # Initialize and train the predictive models
     print("🤖 Training predictive maintenance models...")
@@ -620,6 +633,9 @@ def main():
     print("\n" + "=" * 60)
     print("🎉 Solar Panel Grid Analysis Complete!")
     print("=" * 60)
+    print(f"⚡ Analyzed {grid_simulator.total_panels:,} panels over 7 days")
+    print(f"📊 Processed {len(data_with_predictions):,} total data points")
+    print(f"🔧 Identified maintenance needs across {grid_simulator.grid_size_km}×{grid_simulator.grid_size_km} km² area")
 
     return data_with_predictions, predictor, grid_simulator
 
